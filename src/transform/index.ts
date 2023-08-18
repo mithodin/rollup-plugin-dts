@@ -4,11 +4,13 @@ import ts from "typescript";
 import { NamespaceFixer } from "./NamespaceFixer.js";
 import { preProcess } from "./preprocess.js";
 import { convert } from "./Transformer.js";
-import {ExportsFixer} from "./ExportsFixer.js";
+import { ExportsFixer } from "./ExportsFixer.js";
 
 function parse(fileName: string, code: string): ts.SourceFile {
   return ts.createSourceFile(fileName, code, ts.ScriptTarget.Latest, true);
 }
+
+const PLUGIN_NAME = "dts-transform";
 
 /**
  * This is the *transform* part of `rollup-plugin-dts`.
@@ -33,7 +35,7 @@ export const transform = () => {
   const allFileReferences = new Map<string, Set<string>>();
 
   return {
-    name: "dts-transform",
+    name: PLUGIN_NAME,
 
     options({ onLog, ...options }) {
       return {
@@ -89,7 +91,7 @@ export const transform = () => {
         console.log(JSON.stringify(converted.ast.body, undefined, 2));
       }
 
-      return { code, ast: converted.ast as any, map: preprocessed.code.generateMap() as any };
+      return { code, ast: converted.ast as any, map: preprocessed.code.generateMap() as any, meta: { [PLUGIN_NAME]: preprocessed.typeExports } };
     },
 
     renderChunk(inputCode, chunk, options) {
@@ -129,7 +131,8 @@ export const transform = () => {
         code += "\nexport { }";
       }
 
-      const exportsFixer = new ExportsFixer(parse(chunk.fileName, code));
+      const typeExports = (this.getModuleInfo(chunk.facadeModuleId!)?.meta?.[PLUGIN_NAME]);
+      const exportsFixer = new ExportsFixer(parse(chunk.fileName, code), typeExports ?? new Set());
 
       return { code: exportsFixer.fix(), map: { mappings: "" } };
     },

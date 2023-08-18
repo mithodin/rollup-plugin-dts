@@ -15,7 +15,7 @@ type ExportDeclaration = {
 
 export class ExportsFixer {
   private readonly DEBUG = !!(process.env.DTS_EXPORTS_FIXER_DEBUG);
-  constructor(private readonly source: ts.SourceFile) {}
+  constructor(private readonly source: ts.SourceFile, private readonly typeExports: Set<string>) {}
 
   public fix(): string {
     const exports = this.findExports();
@@ -24,13 +24,13 @@ export class ExportsFixer {
   }
 
   private findExports(): Array<ExportDeclaration> {
-    const { rawExports, values, types} = this.getExportsAndLocals();
+    const { rawExports, types} = this.getExportsAndLocals();
 
     return rawExports.map((rawExport) => {
       const elements = rawExport.elements.map((e) => {
         const exportedName = e.name.text;
         const localName = e.propertyName?.text ?? e.name.text;
-        const kind = types.some(node => node.getText() === localName) && !values.some(node => node.getText() === localName) ? 'type' as const : 'value' as const;
+        const kind = this.typeExports.has(exportedName) || types.has(localName) ? 'type' as const : 'value' as const;
         this.DEBUG && (console.log(`export ${localName} as ${exportedName} is a ${kind}`));
         return {
           exportedName,
@@ -50,14 +50,14 @@ export class ExportsFixer {
 
   private getExportsAndLocals(statements: Iterable<ts.Node> = this.source.statements) {
     const rawExports: Array<ts.NamedExports> = [];
-    const values: Array<ts.Identifier> = [];
-    const types: Array<ts.Identifier> = [];
+    const values = new Set<string>();
+    const types = new Set<string>();
 
     const recurseInto = (subStatements: Iterable<ts.Node>) => {
       const { rawExports: subExports, values: subValues, types: subTypes} = this.getExportsAndLocals(subStatements);
       rawExports.push(...subExports);
-      values.push(...subValues);
-      types.push(...subTypes);
+      subValues.forEach((name) => values.add(name));
+      subTypes.forEach((name) => types.add(name));
     };
 
     for (const statement of statements) {
@@ -67,7 +67,7 @@ export class ExportsFixer {
       }
       if (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) {
         this.DEBUG && console.log(`${statement.name.getFullText()} is a type`);
-        types.push(statement.name);
+        types.add(statement.name.getText());
         continue;
       }
       if (
@@ -80,13 +80,13 @@ export class ExportsFixer {
           for (const declaration of statement.declarationList.declarations) {
             if (ts.isIdentifier(declaration.name)) {
               this.DEBUG && console.log(`${declaration.name.getFullText()} is a value (from var statement)`);
-              values.push(declaration.name);
+              values.add(declaration.name.getText());
             }
           }
         } else {
           if (statement.name) {
             this.DEBUG && console.log(`${statement.name.getFullText()} is a value (from declaration)`);
-            values.push(statement.name);
+            values.add(statement.name.getText());
           }
         }
         continue;
@@ -105,9 +105,6 @@ export class ExportsFixer {
         continue;
       }
       if (ts.isExportDeclaration(statement)) {
-        if (statement.moduleSpecifier) {
-          continue;
-        }
         if (statement.isTypeOnly) {
           // no fixup neccessary
           continue;
@@ -121,7 +118,8 @@ export class ExportsFixer {
       }
       this.DEBUG && console.log('unhandled statement', statement.getFullText(), statement.kind);
     }
-    return { rawExports, values, types };
+    const onlyTypes = new Set([...types].filter((typeIdentifier) => !values.has(typeIdentifier)));
+    return { rawExports, values, types: onlyTypes };
   }
 
   private createNamedExport(exportSpec: NamedExport, elideType = false) {

@@ -13,6 +13,11 @@ interface PreProcessOutput {
   code: MagicString;
   typeReferences: Set<string>;
   fileReferences: Set<string>;
+  typeExports: Set<string>;
+}
+
+function isType(node: ts.Node) {
+  return ts.isInterfaceDeclaration(node) ||ts.isTypeAliasDeclaration(node);
 }
 
 /**
@@ -32,6 +37,8 @@ interface PreProcessOutput {
  */
 export function preProcess({ sourceFile }: PreProcessInput): PreProcessOutput {
   const code = new MagicString(sourceFile.getFullText());
+  const typeExports = new Set<string>();
+  const valueExports = new Set<string>();
 
   /** All the names that are declared in the `SourceFile`. */
   const declaredNames = new Set<string>();
@@ -78,6 +85,11 @@ export function preProcess({ sourceFile }: PreProcessInput): PreProcessOutput {
         if (matchesModifier(node, ts.ModifierFlags.ExportDefault)) {
           defaultExport = name;
         } else if (matchesModifier(node, ts.ModifierFlags.Export)) {
+          if (isType(node)) {
+            typeExports.add(name);
+          } else {
+            valueExports.add(name);
+          }
           exportedNames.add(name);
         }
         if (!(node.flags & ts.NodeFlags.GlobalAugmentation)) {
@@ -100,6 +112,7 @@ export function preProcess({ sourceFile }: PreProcessInput): PreProcessOutput {
           const name = decl.name.getText();
           declaredNames.add(name);
           if (isExport) {
+            valueExports.add(name);
             exportedNames.add(name);
           }
         }
@@ -152,7 +165,21 @@ export function preProcess({ sourceFile }: PreProcessInput): PreProcessOutput {
         }
       }
     }
+
+    if (ts.isExportDeclaration(node)) {
+      if (node.isTypeOnly) {
+        if (node.exportClause && ts.isNamedExports(node.exportClause)) {
+          node.exportClause.elements.forEach((element) => {
+            typeExports.add(element.name.getText());
+          });
+        }
+      }
+    }
   }
+
+  valueExports.forEach((name) => {
+    typeExports.delete(name);
+  });
 
   /**
    * Pass 2:
@@ -255,6 +282,7 @@ export function preProcess({ sourceFile }: PreProcessInput): PreProcessOutput {
     code,
     typeReferences,
     fileReferences,
+    typeExports
   };
 
   function checkInlineImport(node: ts.Node) {
