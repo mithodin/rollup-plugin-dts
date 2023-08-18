@@ -167,12 +167,12 @@ export function preProcess({ sourceFile }: PreProcessInput): PreProcessOutput {
     }
 
     if (ts.isExportDeclaration(node)) {
-      if (node.isTypeOnly) {
-        if (node.exportClause && ts.isNamedExports(node.exportClause)) {
-          node.exportClause.elements.forEach((element) => {
+      if (node.exportClause && ts.isNamedExports(node.exportClause)) {
+        node.exportClause.elements.forEach((element) => {
+          if (element.isTypeOnly || node.isTypeOnly) {
             typeExports.add(element.name.getText());
-          });
-        }
+          }
+        });
       }
     }
   }
