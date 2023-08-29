@@ -2,7 +2,7 @@ import * as path from "path";
 import type { Plugin } from "rollup";
 import ts from "typescript";
 import { NamespaceFixer } from "./NamespaceFixer.js";
-import { preProcess } from "./preprocess.js";
+import { type ExportKind, preProcess } from "./preprocess.js";
 import { convert } from "./Transformer.js";
 import { ExportsFixer } from "./ExportsFixer.js";
 
@@ -33,6 +33,7 @@ const PLUGIN_NAME = "dts-transform";
 export const transform = () => {
   const allTypeReferences = new Map<string, Set<string>>();
   const allFileReferences = new Map<string, Set<string>>();
+  const exportMap = new Map<string, Map<string, ExportKind>>();
 
   return {
     name: PLUGIN_NAME,
@@ -74,11 +75,13 @@ export const transform = () => {
     },
 
     transform(code, fileName) {
+      console.log(fileName);
       let sourceFile = parse(fileName, code);
       const preprocessed = preProcess({ sourceFile });
       // `sourceFile.fileName` here uses forward slashes
       allTypeReferences.set(sourceFile.fileName, preprocessed.typeReferences);
       allFileReferences.set(sourceFile.fileName, preprocessed.fileReferences);
+      exportMap.set(sourceFile.fileName, preprocessed.exports);
 
       code = preprocessed.code.toString();
 
@@ -94,7 +97,16 @@ export const transform = () => {
       return { code, ast: converted.ast as any, map: preprocessed.code.generateMap() as any, meta: { [PLUGIN_NAME]: preprocessed.typeExports } };
     },
 
-    renderChunk(inputCode, chunk, options) {
+    moduleParsed(_info) {
+      // console.log('parsed:', JSON.stringify(info, undefined, 2));
+    },
+
+    buildEnd() {
+      console.log(exportMap);
+    },
+
+    renderChunk(inputCode, chunk, options, _meta) {
+      // console.log(JSON.stringify(meta, null, 2));
       const source = parse(chunk.fileName, inputCode);
       const fixer = new NamespaceFixer(source);
 
@@ -110,7 +122,7 @@ export const transform = () => {
             const absolutePathToOriginal = path.join(path.dirname(fileName), ref);
             const chunkFolder =
               (options.file && path.dirname(options.file)) ||
-              (chunk.facadeModuleId && path.dirname(chunk.facadeModuleId!)) ||
+              (chunk.facadeModuleId && path.dirname(chunk.facadeModuleId)) ||
               ".";
             let targetRelPath = path.relative(chunkFolder, absolutePathToOriginal).split("\\").join("/");
             if (targetRelPath[0] !== ".") {
@@ -131,8 +143,10 @@ export const transform = () => {
         code += "\nexport { }";
       }
 
-      const typeExports = (this.getModuleInfo(chunk.facadeModuleId!)?.meta?.[PLUGIN_NAME]);
-      const exportsFixer = new ExportsFixer(parse(chunk.fileName, code), typeExports ?? new Set());
+      const moduleInfo = chunk.facadeModuleId && this.getModuleInfo(chunk.facadeModuleId) || undefined;
+      // console.log(JSON.stringify(moduleInfo, undefined, 2));
+      const typeExports: Set<string> = moduleInfo?.meta?.[PLUGIN_NAME] ?? new Set();
+      const exportsFixer = new ExportsFixer(parse(chunk.fileName, code), typeExports);
 
       return { code: exportsFixer.fix(), map: { mappings: "" } };
     },

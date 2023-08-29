@@ -99,7 +99,7 @@ export class ExportsFixer {
       if (ts.isModuleDeclaration(statement)) {
         if (statement.name && ts.isIdentifier(statement.name)) {
           this.DEBUG && console.log(`${statement.name.getFullText()} is a value (from module declaration)`);
-          values.push(statement.name);
+          values.add(statement.name.getText());
         }
         recurseInto(statement.getChildren());
         continue;

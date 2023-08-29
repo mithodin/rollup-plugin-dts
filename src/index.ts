@@ -66,11 +66,8 @@ const plugin: PluginImpl<Options> = (options = {}) => {
   const ctx: DtsPluginContext = { programs: [], resolvedOptions: resolveDefaultOptions(options) };
 
   return {
+    ...transformPlugin,
     name: "dts",
-
-    // pass outputOptions & renderChunk hooks to the inner transform plugin
-    outputOptions: transformPlugin.outputOptions,
-    renderChunk: transformPlugin.renderChunk,
 
     options(options) {
       let { input = [] } = options;

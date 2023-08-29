@@ -14,11 +14,14 @@ interface PreProcessOutput {
   typeReferences: Set<string>;
   fileReferences: Set<string>;
   typeExports: Set<string>;
+  exports: Map<string, ExportKind>;
 }
 
 function isType(node: ts.Node) {
   return ts.isInterfaceDeclaration(node) ||ts.isTypeAliasDeclaration(node);
 }
+
+export type ExportKind = { type: "type" } | { type: "value" } | { type: "importFrom", module: string, localName: string } | { type: "unknown" };
 
 /**
  * The pre-process step has the following goals:
@@ -39,6 +42,7 @@ export function preProcess({ sourceFile }: PreProcessInput): PreProcessOutput {
   const code = new MagicString(sourceFile.getFullText());
   const typeExports = new Set<string>();
   const valueExports = new Set<string>();
+  const exports = new Map<string, ExportKind>();
 
   /** All the names that are declared in the `SourceFile`. */
   const declaredNames = new Set<string>();
@@ -171,6 +175,10 @@ export function preProcess({ sourceFile }: PreProcessInput): PreProcessOutput {
         node.exportClause.elements.forEach((element) => {
           if (element.isTypeOnly || node.isTypeOnly) {
             typeExports.add(element.name.getText());
+          } else {
+            if (node.moduleSpecifier) {
+              exports.set(element.name.getText(), { type: "importFrom", module: node.moduleSpecifier.getText(), localName: element.propertyName?.getText() || element.name.getText() })
+            }
           }
         });
       }
@@ -179,7 +187,12 @@ export function preProcess({ sourceFile }: PreProcessInput): PreProcessOutput {
 
   valueExports.forEach((name) => {
     typeExports.delete(name);
+    exports.set(name, { type: "value" });
   });
+  typeExports.forEach((name) => {
+      exports.set(name, { type: "type" });
+  });
+  console.log(exports);
 
   /**
    * Pass 2:
@@ -282,7 +295,8 @@ export function preProcess({ sourceFile }: PreProcessInput): PreProcessOutput {
     code,
     typeReferences,
     fileReferences,
-    typeExports
+    typeExports,
+    exports
   };
 
   function checkInlineImport(node: ts.Node) {
